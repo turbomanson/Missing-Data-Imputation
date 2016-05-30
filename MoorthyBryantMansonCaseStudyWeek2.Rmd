@@ -1,0 +1,286 @@
+---
+title: Impute missing values in cars dataset using Multivariate Imputation by Chained
+  Equation (MICE) in R
+output: html_document
+---
+
+```{r echo=FALSE, results='hide',message=FALSE}
+#Import Libraries
+library(mice)
+library(lattice)
+library(VIM)
+#set the working dirrectory where the data is stored
+setwd("~/documents/quantify/")
+
+#Read the data from csv
+data = read.csv("carmpg1.csv", header = TRUE)
+```
+
+### By Carl Bryant, Moorthy Manickam and Trenton Manson  
+#### Southern Methodist University (SMU), Dallas
+
+#### Course: MSDS 7333 QUANTIFYING THE WORLD
+#### Professor: Dr. Monnie Harper
+
+#### Submitted On: May 25, 2016
+***  
+#### Introduction  
+The R package Multivariate Imputation by Chained Equation (MICE) imputes incomplete multivariate data by chained equations. We chose this package to impute missing values in the cars dataset to better understand various components of the package and eventually use it in the real world scenario.  
+
+#### Background  
+Missing data is a problem in data analysis since we don’t get the complete picture of the data to infer any actionable insights. There could be multiple reasons why some data is missing. The best approach is to get to the root cause of the problem and fix it. Most of the time it’s not feasible. So, the next option is to omit the observations with missing values. But, we might end up with lesser data and not able to accomplish the analysis. The more data we have, the better we are able to come up with the analysis results. So, the final option is to impute missing data and conduct the analysis.  
+
+#### Common types of missing data
+1. **MCAR** (missing completely at random): The probability that an observation *Xi* is missing is not related to the value of *Xj*
+2. **MAR** (missing at random): missing-ness does not depend on the value of *Xi* after controlling for another variable
+3. **MNAR** (missing not at random): missing-ness depends on the value of *Xi*  
+
+#### Cars dataset
+Professor Allen Elliott provided the dataset for this analysis. A similar dataset is also available on the Carnegie Mellon University’s StatLib library. The dataset contains 38 observations and 7 attributes. 
+
+* `MPG` - The fuel efficency measured in average miles per gallon. 
+* `CYLINDERS` - The number cylinders in the engine.  
+* `SIZE` - The displacement of the engine in cubic inches.  
+* `HP` - The power of the engine measured in horsepower.  
+* `WEIGHT` - The weight of the car in thousands of pounds.  
+* `ENG_TYPE` - 1 for a v-configurations and 0 for an inline configuration.  
+
+See Appendix A for the complete dataset (with missing values)  
+
+####Dataset Analysis  
+The initial analysis of the dataset revealed that there are 19 observations with missing data. The purpose of this dataset is to predict the independent variable MPG using the dependent variables present in the dataset. We must first try to find a pattern of missing-ness. More specifically, we are trying to determine if the data is missing completely at random (MCAR) or missing not at random (MNAR).  
+
+####Common methods for dealing with missing values
+1. Listwise deletion:  
+Delete any case where some data is missing and use only complete cases. This method assumes the missing-ness is due to MCAR and/or MAR. This is default method for most software packages such as R and SAS.
+2. Pairwise deletion:  
+Use all available data for each variable. This method assumes the missing-ness is due to MCAR
+3. Estimation of individual missing values:  
+Replace missing values with "likely" estimates
+
+####Type of missing values in cars dataset and the MI method selection
+Variable | Number of Missing
+------------- | -------------
+MPG | 0
+CYLINDERS | 4
+SIZE | 3
+HP | 5
+WEIGHT | 6
+ENG_TYPE | 3  
+
+
+```{r echo=FALSE, results='hide',message=FALSE}
+aggr_plot1 = aggr(data, col=mdc(1:2), numbers=TRUE, sortVars=TRUE, labels=names(data), cex.axis=.7, gap=3, ylab=c("Proportion of Missingness","Missingness Pattern"))
+```  
+  
+Note that, blue refers to observed data and red to the missing data.  
+
+Looking at the distribution of missing data, we see no evidence against the data being MCAR. Assuming the values are MCAR, we can use Multiple Imputation (MI) to generate likely values for our missing observations. For Multiple Imputation, we will use the **MICE** package, which is maintained by Stef van Buuren. The **MICE** package uses a **Markov Chain Monte Carlo** (MCMC) method that uses inter-correlation to impute likely values for the missing observations.  
+
+#### Multiple Imputation (MI)  
+
+Function `mice()` in **MICE** package is a **Markov Chain Monte Carlo** (MCMC) method that uses correlation structure of the data and imputes missing values for each incomplete variable m times by regression of incomplete variables on the other variables iteratively.  
+We imputed 5 data sets using 40 iterations in the Markov Chain. To evaluate the quality of the imputed values we first evaluated several diagnostic plots. Then we did a comparison of a linear model using the pooled imputed data sets to a linear model using the original data set, handling the missing values using listwise deletion.
+
+
+```{r echo=FALSE, results='hide',message=FALSE}
+missing.model = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE, data=data)
+summary(missing.model)
+#(20 observations deleted due to missingness)
+
+## Fill-in missing values by MI method
+
+# Function mice() in mice package is a Markov Chain Monte Carlo (MCMC) method that uses 
+# correlation structure of the data and imputes missing values for each incomplete 
+# variable m times by regression of incomplete variables on the other variables iteratively. 
+imp = mice(data, m=5, printFlag=FALSE, maxit = 40, seed=2525)
+
+# The output imp contains m=5 completed datasets. Each dataset can be analysed
+# using function with(), and including an expression for the statistical analysis approach
+# we want to apply for each imputed dataset as follows
+fit.mi = with(data=imp, exp = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE))
+summary(fit.mi)
+
+# Next, we combine all the results of the 5 imputed datasets using the pool() function
+combFit = pool(fit.mi) 
+
+round(summary(combFit),2)
+
+```
+**MICE** runs parallel chains, each with a certain number of iterations, and imputes values from the final iteration. To monitor the convergence we can use trace plots, which plot estimates of the mean and standard deviation for each imputed dataset against the number of iterations. We see this below for each imputed variable.
+
+```{r, echo=FALSE}
+plot(imp)
+```  
+
+How well the parallel chains mix is a good indicator of convergence. We see here that the five estimates for each variable mixed very well, showing strong convergence.  
+
+##### Density Plot- Observed vs Imputed
+```{r, echo=FALSE}
+densityplot(imp)
+```  
+
+The density plot compares the desity of the values of the imputed values (red) with the observed (blue). The densities have similar shapes with some variation which is good as it shows that the imputations are not decreasing the variation of the data set, which is a problem with list wise deletion.  We will further examine the imputations in the next two plots. 
+
+##### Scatter Plot- Observed vs Imputed
+```{r, echo=FALSE}
+# We can inspect the distributions of the original and the imputed data:
+## scatterplot (of weight and hp) for each imputed dataset
+xyplot(imp, WEIGHT ~ HP | .imp, pch = 20, cex = 1.4)
+```  
+
+This scatterplot is of both the original (blue) and imputed (red) observations for both horsepower and weight.  These two variables had the most missing values, so this is where the most problems are likely to occur. Each plot is of one of the five imputed data sets. The third imputation does have one observation that stands out as being high, but looking at it in context of pooling them together, this is not out of the ordinary.
+
+##### Strip Plot- Observed vs Imputed
+```{r, echo=FALSE}
+# Distributions of the variables as individual points can be visualised by
+# stripplot. imputations should be close to the data; we do not expect to see see impossible values like for example negative values
+stripplot(imp, pch = 20, cex = 1.2)
+```  
+
+The strip plots above are univatiate plots for each variable.  On the x-axis we the original data set (0) and each of the 5 imputed data sets.  On the y-axis we have the coresponding values for each obeservation. This plot is valuable because we can check to see that each imputed value is feasable.  Looking at all the imputed values in red across each variable, the imputed values look very good.  There are no cars with 7 cylinders, no strange negative values and overall the imputed values seem to follow the natural distributions.
+ 
+##### Linear Regression of Orignial Data Set - Listwise Deletion
+We will first examine a linear regresssion model using our original data set and listwise deletion to compare against the model using imputed values.
+```{r}
+missing.model = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE, data=data)
+summary(missing.model)
+```  
+
+##### Linear Regression Using Pooled Imputed Data
+The output `imp` contains m=5 completed datasets. Each imputed dataset can be analyzed using function `with()`, which takes an argument for the statistical analysis we want to apply.
+```{r}
+imp = mice(data, m=5, printFlag=FALSE, maxit = 40, seed=2525)
+fit.mi = with(data=imp, exp = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE))
+```
+Next, we combine all the results of the 5 imputed datasets using the `pool()` function
+```{r}
+combFit = pool(fit.mi) 
+round(summary(combFit),4)
+pool.r.squared(fit.mi)
+```  
+
+In the output above, column *fmi* contains the fraction of missing information and the column *lambda* is the proportion of the total variance that is attributable to the missing data $(λ = (B + B/m)/T)$.  
+
+The pooled results are subject to simulation error and dependent on the seed argument
+of the `mice()` function. In order to minimize simulation error, van Buuren recommends using a higher number
+of imputations, for example m=50. To see if the model based on the imputed data is affected.
+
+```{r}
+imp50 = mice(data, m=50, printFlag=FALSE, maxit = 40, seed=2525)
+fit.mi50 = with(data=imp, exp = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE))
+combFit50 = pool(fit.mi) 
+round(summary(combFit50), 4)
+pool.r.squared(fit.mi50)
+```  
+In this case, we see that increasing the number of imputations did not have an effect on our model.  There is very little to no change in the coefficents and associated statistical values of the linear regression when running these models several times.  
+
+When comparing the models created using the imputted data to a model created using list-wise deletions, there are several differences. The standard error was lower for every valiable in the the imputed model.  `CYLINDERS`, `HP` and `ENG_TYPE` had p-values less than .05 for the imputed model, contrasting with only `CYLINDERS` having the same level of signifigance in the list-wise deletion model.
+
+#### Conclusion
+Multiple impution is an effect way of dealling with data that is MCAR.  The **MICE** package is very comprehensive, providing powerful options for multiple impution in addition to a variety of built in plots for evaluating the fit of the imputed values.  For the cars data set, the imputed values allowed us to create a better fit linear model with less error for predicting `MPG`. For working with the MICE package, the author's paper *mice: Multivariate Imputation by Chained Equations in R* is very valuable resource.  
+
+***  
+
+# Appendix A
+
+## Original Data Set With Missing Values
+```{r echo=FALSE}
+data
+```  
+
+# Appendix B
+
+## Complete R Code
+```{r echo=TRUE, results='hide',message=FALSE, eval=FALSE}
+#Code adapted from Noghrehchi and Alice as cited in Resources
+#Methods validated and adapted based on paper by van Buuren
+
+#Import Libraries
+library(mice)
+library(lattice)
+library(VIM)
+#set the working dirrectory where the data is stored
+setwd("~/documents/quantify/")
+
+#Read the data from csv
+data = read.csv("carmpg1.csv", header = TRUE)
+
+
+summary(data)
+#Check check percentage of missing data in features (columns) and samples (rows)
+#ideally less than 5%
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(data,2,pMiss)
+apply(data,1,pMiss)
+
+#d.pattern() to get a better understanding of the pattern of missing data
+md.pattern(data)
+# Missingness pattern can also be visualised in VIM package
+aggr_plot1 = aggr(data, col=mdc(1:2), numbers=TRUE, sortVars=TRUE, labels=names(data), cex.axis=.7, gap=3, ylab=c("Proportion of missingness","Missingness Pattern"))
+#Note that, blue refers to observed data and red to the missing data.
+
+# Delete cases with missing values (complete case analysis), and fit a linear model,
+# lm function does these two steps together
+missing.model = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE, data=data)
+summary(missing.model)
+#(20 observations deleted due to missingness)
+
+## Fill-in missing values by MI method
+
+# Function mice() in mice package is a Markov Chain Monte Carlo (MCMC) method that uses 
+# correlation structure of the data and imputes missing values for each incomplete 
+# variable m times by regression of incomplete variables on the other variables iteratively. 
+imp = mice(data, m=5, printFlag=FALSE, maxit = 40, seed=2525)
+
+# The output imp contains m=5 completed datasets. Each dataset can be analysed
+# using function with(), and including an expression for the statistical analysis approach
+# we want to apply for each imputed dataset as follows
+fit.mi = with(data=imp, exp = lm(MPG ~ WEIGHT + CYLINDERS + HP + ENG_TYPE + SIZE))
+summary(fit.mi)
+
+# Next, we combine all the results of the 5 imputed datasets using the pool() function
+combFit = pool(fit.mi) 
+
+round(summary(combFit),2)
+
+# We can inspect the distributions of the original and the imputed data:
+## scatterplot (of weight and hp) for each imputed dataset
+xyplot(imp, WEIGHT ~ HP | .imp, pch = 20, cex = 1.4)
+
+# Blue represents the observed data and red shows the imputed data. These colours are consistent with what they represent from now on. 
+# Here, we expect the red points (imputed data) have almost the same shape as blue points
+# (observed data). Blue points are constant across imputed datasets, but red points differ
+# from each other, which represents our uncertainty about the true values of missing data.
+
+## To detect interesting differences between observed and imputed data
+densityplot(imp)
+
+# This plot compares the density of observed data with the ones of imputed data. We expect them
+# to be similar (though not identical) under MAR assumption.
+
+# Distributions of the variables as individual points can be visualised by
+# stripplot. imputations should be close to the data; we do not expect to see see impossible values like for example negative values
+stripplot(imp, pch = 20, cex = 1.2)
+
+# MICE runs m parallel chains, each with a certain number of iterations, and imputes
+# values from the final iteration. How many iterations does mice() use and how can we make sure that
+# this number is enough?
+# To monitor convergence we can use trace plots, which plot estimates against the number of iteration.
+plot(imp)
+
+
+#Visiting sequence: In what sequence does mice() impute incomplete variables?
+vis=imp$vis; vis
+# mice() imputes values according to the column sequence of variables in the dataset, from left
+# to right.
+```
+
+## Resources
+
+Alice, Michy. _Imputing missing data with R; MICE package._ October 4, 2015 <http://www.r-bloggers.com/imputing-missing-data-with-r-mice-package/>  
+
+van Buuren, Stef.  _mice: Multivariate Imputation by Chained Equations in R_ December 12, 2012 <https://www.jstatsoft.org/article/view/v045i03>  
+
+Noghrehchi, Firouzeh. _Missing Data Analysis with mice_ May 29, 2015 <http://web.maths.unsw.edu.au/~dwarton/missingDataLab.html>
+
